@@ -49,6 +49,9 @@ impl TransactionService for MyTransactionService {
     }
 }
 
+#[derive(Default)]
+pub struct MyPaymentService {}
+
 #[tonic::async_trait]
 impl PaymentService for MyPaymentService {
     async fn process_payment(
