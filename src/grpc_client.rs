@@ -1,3 +1,9 @@
+use tonic::transport::Channel;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
+use tokio::sync::mpsc::{Sender, Receiver};
+use tokio::io::{self, AsyncBufReadExt};
+
 pub mod services {
     tonic::include_proto!("services");
 }
@@ -5,6 +11,7 @@ pub mod services {
 use services::{
     payment_service_client::PaymentServiceClient, PaymentRequest,
     transaction_service_client::TransactionServiceClient, TransactionRequest,
+    chat_service_client::ChatServiceClient, ChatMessage,
 };
 
 #[tokio::main]
@@ -27,6 +34,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     while let Some(transaction) = stream.message().await? {
         println!("Transaction: {:?}", transaction);
+    }
+
+    let channel = Channel::from_static("http://[::1]:50051").connect().await?;
+    let mut client = ChatServiceClient::new(channel);
+
+    let (tx, rx): (Sender<ChatMessage>, Receiver<ChatMessage>) = mpsc::channel(32);
+
+    tokio::spawn(async move {
+        let stdin = io::stdin();
+        let mut reader = io::BufReader::new(stdin).lines();
+        
+        while let Ok(Some(line)) = reader.next_line().await {
+            if line.trim().is_empty() {
+                continue;
+            }
+            
+            let message = ChatMessage {
+                user_id: "user_123".to_string(),
+                message: line,
+            };
+            
+            if tx.send(message).await.is_err() {
+                eprintln!("Failed to send message to server.");
+                break;
+            }
+        }
+    });
+
+    let request_stream = ReceiverStream::new(rx);
+
+    let response = client.chat(tonic::Request::new(request_stream)).await?;
+
+    let mut response_stream = response.into_inner();
+
+    println!("=== CHAT SERVICE READY ===");
+    println!("Silakan ketik pesan lu di bawah ini (tekan Enter buat ngirim):");
+
+    while let Some(message) = response_stream.message().await? {
+        println!("CS Bot: {}", message.message);
     }
 
     Ok(())
